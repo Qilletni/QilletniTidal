@@ -1,0 +1,71 @@
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
+}
+
+group = 'dev.qilletni.lib.tidal'
+version = '1.0.0'
+
+sourceCompatibility = JavaVersion.VERSION_22
+targetCompatibility = JavaVersion.VERSION_22
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+ext {
+    oltu_version = "1.0.1"
+    retrofit_version = "2.11.0"
+    jakarta_annotation_version = "1.3.5"
+    swagger_annotations_version = "1.5.22"
+    junit_version = "5.10.3"
+    json_fire_version = "1.9.0"
+}
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.9.1')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+
+    compileOnly 'org.apache.logging.log4j:log4j-api:2.22.1'
+    compileOnly 'org.apache.logging.log4j:log4j-core:2.22.1'
+    compileOnly 'org.apache.logging.log4j:log4j-slf4j-impl:2.22.1'
+
+    // Provided by the `postgres` library
+    compileOnly 'org.hibernate:hibernate-core:5.5.7.Final'
+    compileOnly 'org.postgresql:postgresql:42.3.8'
+
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:1.10.2"
+
+//    implementation 'com.tidal.sdk:tidalapi:0.1.87-java'
+    implementation 'com.tidal.sdk:tidalapi-standalone:0.3.20'
+
+    compileOnly 'dev.qilletni.api:qilletni-api:1.0.0-SNAPSHOT'
+
+    implementation "com.squareup.retrofit2:retrofit:$retrofit_version"
+    implementation "com.squareup.retrofit2:converter-scalars:$retrofit_version"
+    implementation "com.squareup.retrofit2:converter-gson:$retrofit_version"
+
+
+    implementation "org.apache.oltu.oauth2:org.apache.oltu.oauth2.client:1.0.2"
+    implementation "org.apache.oltu.oauth2:org.apache.oltu.oauth2.common:1.0.2"
+
+
+    // Provided by the `postgres` library
+    compileOnly 'org.hibernate:hibernate-core:5.5.7.Final'
+    compileOnly 'org.postgresql:postgresql:42.3.8'
+}
+
+java {
+    // Make sure dependencies go to classpath rather than module-path
+//    modularity.inferModulePath = false
+}
+
+shadowJar {
+    configurations = [project.configurations.runtimeClasspath]
+    archiveClassifier.set('')
+}
+
+test {
+    useJUnitPlatform()
+}
