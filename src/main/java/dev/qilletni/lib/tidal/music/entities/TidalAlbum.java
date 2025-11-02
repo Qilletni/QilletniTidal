@@ -30,11 +30,10 @@ public class TidalAlbum implements Album {
 
     public TidalAlbum() {}
 
-    public TidalAlbum(String id, String name, List<TidalArtist> artists, List<TidalTrack> tracks) {
+    public TidalAlbum(String id, String name, List<TidalArtist> artists) {
         this.id = id;
         this.name = name;
         this.artists = artists;
-        this.tracks = tracks;
     }
 
     @Override
@@ -55,6 +54,14 @@ public class TidalAlbum implements Album {
     @Override
     public List<Artist> getArtists() {
         return artists.stream().map(Artist.class::cast).toList();
+    }
+
+    public List<TidalTrack> getTracks() {
+        return tracks;
+    }
+
+    public void setTracks(List<TidalTrack> tracks) {
+        this.tracks = tracks;
     }
 
     @Override

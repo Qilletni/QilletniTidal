@@ -146,8 +146,9 @@ public class TidalOAuthAuthorizer implements TidalAuthorizer {
         var completableFuture = new CompletableFuture<TidalApiClient>();
 
         if (packageConfig.get(PERSIST_ACCESS_TOKEN).isEmpty() || packageConfig.get(PERSIST_REFRESH_TOKEN).isEmpty() || packageConfig.get(PERSIST_EXPIRES).isEmpty()) {
-            LOGGER.debug("No cached token found, starting manual authentication");
+            LOGGER.info("No cached token found, starting manual authentication");
             performManualAuth(completableFuture);
+            return completableFuture;
         }
 
         LOGGER.debug("Found cached token, attempting to use it");
@@ -244,6 +245,7 @@ public class TidalOAuthAuthorizer implements TidalAuthorizer {
      * Performs manual OAuth authentication flow.
      */
     private void performManualAuth(CompletableFuture<TidalApiClient> completableFuture) {
+        System.out.println("accessToken = " + packageConfig.get(PERSIST_ACCESS_TOKEN));
         try {
             getCodeFromUser()
                 .thenCompose(this::finalizeAuthentication)
@@ -288,10 +290,15 @@ public class TidalOAuthAuthorizer implements TidalAuthorizer {
         String redirectUri = getRedirectUri();
         String scopes = String.join(" ",
             "user.read",
-            "playlists.read",
+            "collection.read",
+            "search.read",
             "playlists.write",
-            "user.library.read",
-            "user.library.write"
+            "playlists.read",
+            "entitlements.read",
+            "collection.write",
+            "recommendations.read",
+            "playback"
+//            "search.write"
         );
 
         var codeFuture = new CompletableFuture<AuthCodeResult>();

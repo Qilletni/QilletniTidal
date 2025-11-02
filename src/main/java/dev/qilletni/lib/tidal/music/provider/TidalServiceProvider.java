@@ -55,7 +55,7 @@ public class TidalServiceProvider implements ServiceProvider {
         return authorizer.authorizeTidal().thenAccept(tidalApi -> {
             TidalApiSingleton.setTidalApi(tidalApi);
 
-            musicFetcher = new TidalMusicFetcher("US", tidalApi);
+            musicFetcher = new TidalMusicFetcher("US", tidalApi, authorizer.getCurrentUser().orElseThrow());
             musicCache = new TidalMusicCache(musicFetcher);
             playActor = new DefaultRoutablePlayActor(new ConsolePlayActor());
             trackOrchestrator = defaultTrackOrchestratorFunction.apply(playActor, musicCache);
@@ -68,7 +68,10 @@ public class TidalServiceProvider implements ServiceProvider {
     @Override
     public void shutdown() {
         authorizer.shutdown();
-        TidalApiSingleton.getTidalApi().shutdown();
+
+        if (TidalApiSingleton.getTidalApi() != null) {
+            TidalApiSingleton.getTidalApi().shutdown();
+        }
     }
 
     @Override

@@ -8,24 +8,38 @@ import java.util.Optional;
 
 public class TidalPlaylist implements Playlist {
 
+    private String id;
+    private String title;
+    private User creator;
+    private int trackCount;
+
+    public TidalPlaylist() {}
+
+    public TidalPlaylist(String id, String title, User creator, int trackCount) {
+        this.id = id;
+        this.title = title;
+        this.creator = creator;
+        this.trackCount = trackCount;
+    }
+
     @Override
     public String getId() {
-        return "";
+        return id;
     }
 
     @Override
     public String getTitle() {
-        return "";
+        return title;
     }
 
     @Override
     public User getCreator() {
-        return null;
+        return creator;
     }
 
     @Override
     public int getTrackCount() {
-        return 0;
+        return trackCount;
     }
 
     @Override

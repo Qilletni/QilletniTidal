@@ -2,7 +2,9 @@ import "tidal:tidal.ql"
 
 provider "tidal"
 
-song godKnows = "God Knows" by "Knocked Loose"
+collection demo = "Demo Playlist" collection by "rubbaboy"
 
-print(godKnows)
-print(godKnows.getId())
+print(demo.getTrackCount())
+print(demo.getId())
+
+play demo
