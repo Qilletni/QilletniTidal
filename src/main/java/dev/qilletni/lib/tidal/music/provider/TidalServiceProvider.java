@@ -14,12 +14,15 @@ import dev.qilletni.api.music.factories.SongTypeFactory;
 import dev.qilletni.api.music.orchestration.TrackOrchestrator;
 import dev.qilletni.api.music.play.DefaultRoutablePlayActor;
 import dev.qilletni.api.music.play.PlayActor;
+import dev.qilletni.api.music.strategies.MusicStrategies;
 import dev.qilletni.lib.tidal.api.TidalApiSingleton;
 import dev.qilletni.lib.tidal.api.oauth.TidalOAuthAuthorizer;
 import dev.qilletni.lib.tidal.database.HibernateUtil;
 import dev.qilletni.lib.tidal.music.TidalMusicCache;
 import dev.qilletni.lib.tidal.music.TidalMusicFetcher;
 import dev.qilletni.lib.tidal.music.TidalMusicTypeConverter;
+import dev.qilletni.lib.tidal.music.strategies.TidalMusicStrategies;
+import dev.qilletni.lib.tidal.music.strategies.search.TidalFuzzySearchResolveStrategy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,6 +41,7 @@ public class TidalServiceProvider implements ServiceProvider {
     private TidalMusicCache musicCache;
     private TrackOrchestrator trackOrchestrator;
     private TidalMusicTypeConverter musicTypeConverter;
+    private TidalMusicStrategies musicStrategies;
     private PlayActor playActor;
 
     private static ServiceProvider serviceProviderInstance;
@@ -55,11 +59,16 @@ public class TidalServiceProvider implements ServiceProvider {
         return authorizer.authorizeTidal().thenAccept(tidalApi -> {
             TidalApiSingleton.setTidalApi(tidalApi);
 
-            musicFetcher = new TidalMusicFetcher("US", tidalApi, authorizer.getCurrentUser().orElseThrow());
+            musicStrategies = new TidalMusicStrategies();
+            musicFetcher = new TidalMusicFetcher(musicStrategies, "US", tidalApi, authorizer.getCurrentUser().orElseThrow());
             musicCache = new TidalMusicCache(musicFetcher);
             playActor = new DefaultRoutablePlayActor(new ConsolePlayActor());
             trackOrchestrator = defaultTrackOrchestratorFunction.apply(playActor, musicCache);
             musicTypeConverter = new TidalMusicTypeConverter(musicCache);
+
+            // Register all strategies
+            var searchResolveStrategyFactory = musicStrategies.getSearchResolveStrategyProvider().orElseThrow().getSearchResolveStrategyFactory();
+            searchResolveStrategyFactory.registerStrategy(new TidalFuzzySearchResolveStrategy(musicCache));
 
             serviceProviderInstance = this;
         });
@@ -92,6 +101,11 @@ public class TidalServiceProvider implements ServiceProvider {
     @Override
     public TrackOrchestrator getTrackOrchestrator() {
         return Objects.requireNonNull(trackOrchestrator, "ServiceProvider#initialize must be invoked to initialize TrackOrchestrator");
+    }
+
+    @Override
+    public MusicStrategies<?, ?> getMusicStrategies() {
+        return Objects.requireNonNull(musicStrategies, "ServiceProvider#initialize must be invoked to initialize MusicStrategies");
     }
 
     @Override
@@ -151,3 +165,4 @@ public class TidalServiceProvider implements ServiceProvider {
         return Objects.requireNonNull(serviceProviderInstance, "ServiceProvider#initialize must be invoked to initialize ServiceProvider");
     }
 }
+

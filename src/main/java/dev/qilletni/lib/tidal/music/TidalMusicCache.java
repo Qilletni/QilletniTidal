@@ -458,28 +458,42 @@ public class TidalMusicCache implements MusicCache {
      */
     private Map<String, TidalArtist> resolveAndFetchArtists(List<String> artistIds) {
         var artistMap = new HashMap<String, TidalArtist>();
+
+        if (artistIds.isEmpty()) {
+            return artistMap;
+        }
+
         var missingIds = new ArrayList<>(artistIds);
 
-        // Check DB for existing artists
+        // Bulk query to find existing artists using JPA Criteria API with OR predicates
         try (var entityTransaction = EntityTransaction.beginTransaction()) {
             var session = entityTransaction.getSession();
-            for (var id : new ArrayList<>(missingIds)) {
-                var found = session.find(TidalArtist.class, id);
-                if (found != null) {
-                    artistMap.put(id, found);
-                    missingIds.remove(id);
-                }
+
+            var builder = session.getCriteriaBuilder();
+            var criteria = builder.createQuery(TidalArtist.class);
+            var root = criteria.from(TidalArtist.class);
+
+            var predicates = artistIds.stream()
+                    .map(id -> builder.equal(root.get("id"), id))
+                    .toArray(javax.persistence.criteria.Predicate[]::new);
+
+            criteria.where(builder.or(predicates));
+
+            var foundArtists = session.createQuery(criteria).getResultList();
+            for (var artist : foundArtists) {
+                artistMap.put(artist.getId(), artist);
+                missingIds.remove(artist.getId());
             }
         }
 
         LOGGER.debug("Found {} artists in DB, fetching {} missing artists", artistMap.size(), missingIds.size());
 
-        // Fetch missing artists from API
-        for (var id : missingIds) {
-            var fetched = tidalMusicFetcher.fetchArtistById(id)
-                    .map(TidalArtist.class::cast)
-                    .orElseThrow(() -> new RuntimeException("Failed to fetch artist with ID: " + id));
-            artistMap.put(id, fetched);
+        // Bulk fetch missing artists from API
+        if (!missingIds.isEmpty()) {
+            var fetchedArtists = tidalMusicFetcher.fetchArtistsByIds(missingIds);
+            for (var artist : fetchedArtists) {
+                artistMap.put(artist.getId(), (TidalArtist) artist);
+            }
         }
 
         return artistMap;
@@ -495,54 +509,73 @@ public class TidalMusicCache implements MusicCache {
      */
     private Map<String, TidalAlbum> resolveAndFetchAlbums(List<String> albumIds, Map<String, TidalArtist> artistMap) {
         var albumMap = new HashMap<String, TidalAlbum>();
+
+        if (albumIds.isEmpty()) {
+            return albumMap;
+        }
+
         var missingIds = new ArrayList<>(albumIds);
 
-        // Check DB for existing albums
+        // Bulk query to find existing albums using JPA Criteria API with OR predicates
         try (var entityTransaction = EntityTransaction.beginTransaction()) {
             var session = entityTransaction.getSession();
-            for (var id : new ArrayList<>(missingIds)) {
-                var found = session.find(TidalAlbum.class, id);
-                if (found != null) {
-                    albumMap.put(id, found);
-                    missingIds.remove(id);
-                }
+
+            var builder = session.getCriteriaBuilder();
+            var criteria = builder.createQuery(TidalAlbum.class);
+            var root = criteria.from(TidalAlbum.class);
+
+            var predicates = albumIds.stream()
+                    .map(id -> builder.equal(root.get("id"), id))
+                    .toArray(javax.persistence.criteria.Predicate[]::new);
+
+            criteria.where(builder.or(predicates));
+
+            var foundAlbums = session.createQuery(criteria).getResultList();
+            for (var album : foundAlbums) {
+                albumMap.put(album.getId(), album);
+                missingIds.remove(album.getId());
             }
         }
 
         LOGGER.debug("Found {} albums in DB, fetching {} missing albums", albumMap.size(), missingIds.size());
 
-        // Fetch missing albums from API
-        for (var id : missingIds) {
-            var fetched = tidalMusicFetcher.fetchAlbumById(id)
-                    .map(TidalAlbum.class::cast)
-                    .orElseThrow(() -> new RuntimeException("Failed to fetch album with ID: " + id));
+        if (missingIds.isEmpty()) {
+            return albumMap;
+        }
 
-            // Album might have stub artists - resolve them!
-            var albumArtistIds = fetched.getArtists().stream()
-                    .map(Artist::getId)
-                    .toList();
+        // Bulk fetch all missing albums from API
+        var fetchedAlbums = tidalMusicFetcher.fetchAlbumsByIds(missingIds)
+                .stream()
+                .map(TidalAlbum.class::cast)
+                .toList();
 
-            // Check if we need to fetch any album artists not in our map
-            for (var artistId : albumArtistIds) {
-                if (!artistMap.containsKey(artistId)) {
-                    LOGGER.debug("Album {} has artist {} not in our map, fetching it", id, artistId);
-                    var artist = tidalMusicFetcher.fetchArtistById(artistId)
-                            .map(TidalArtist.class::cast)
-                            .orElseThrow(() -> new RuntimeException("Failed to fetch artist with ID: " + artistId));
-                    artistMap.put(artistId, artist);
+        // Collect ALL missing artist IDs from ALL fetched albums (Pattern D: Collect-then-batch)
+        var missingArtistIds = new HashSet<String>();
+        for (var album : fetchedAlbums) {
+            for (var artist : album.getArtists()) {
+                if (!artistMap.containsKey(artist.getId())) {
+                    missingArtistIds.add(artist.getId());
                 }
             }
+        }
 
-            // Reconstruct album with full artist references
+        // Bulk resolve ALL missing artists at once
+        if (!missingArtistIds.isEmpty()) {
+            LOGGER.debug("Albums need {} additional artists, bulk fetching", missingArtistIds.size());
+            var resolvedArtists = resolveAndFetchArtists(new ArrayList<>(missingArtistIds));
+            artistMap.putAll(resolvedArtists);
+        }
+
+        // Now reconstruct ALL albums with fully resolved artist references
+        for (var album : fetchedAlbums) {
             var resolvedAlbum = new TidalAlbum(
-                    fetched.getId(),
-                    fetched.getName(),
-                    albumArtistIds.stream()
-                            .map(artistMap::get)
+                    album.getId(),
+                    album.getName(),
+                    album.getArtists().stream()
+                            .map(a -> artistMap.get(a.getId()))
                             .toList()
             );
-
-            albumMap.put(id, resolvedAlbum);
+            albumMap.put(album.getId(), resolvedAlbum);
         }
 
         return albumMap;
@@ -556,19 +589,44 @@ public class TidalMusicCache implements MusicCache {
      */
     private Map<String, TidalArtist> storeArtists(List<TidalArtist> artists) {
         var allArtists = new HashMap<String, TidalArtist>();
+
+        if (artists.isEmpty()) {
+            return allArtists;
+        }
+
         try (var entityTransaction = EntityTransaction.beginTransaction()) {
             var session = entityTransaction.getSession();
 
-            for (var artist : artists) {
-                if (allArtists.containsKey(artist.getId())) {
-                    continue;
-                }
+            // Extract all unique artist IDs
+            var artistIds = artists.stream()
+                    .map(TidalArtist::getId)
+                    .distinct()
+                    .toList();
 
-                var found = session.find(TidalArtist.class, artist.getId());
-                if (found != null) {
-                    LOGGER.debug("Artist already in DB: {}", found.getId());
-                    allArtists.put(found.getId(), found);
-                } else {
+            // Bulk query to find existing artists using JPA Criteria API with OR predicates
+            var builder = session.getCriteriaBuilder();
+            var criteria = builder.createQuery(TidalArtist.class);
+            var root = criteria.from(TidalArtist.class);
+
+            var predicates = artistIds.stream()
+                    .map(id -> builder.equal(root.get("id"), id))
+                    .toArray(javax.persistence.criteria.Predicate[]::new);
+
+            criteria.where(builder.or(predicates));
+
+            var existingArtists = session.createQuery(criteria).getResultList();
+
+            // Add existing artists to map
+            for (var existing : existingArtists) {
+                allArtists.put(existing.getId(), existing);
+            }
+
+            LOGGER.debug("Found {} artists in DB, storing {} new artists",
+                    existingArtists.size(), artists.size() - existingArtists.size());
+
+            // Save only artists not found in DB
+            for (var artist : artists) {
+                if (!allArtists.containsKey(artist.getId())) {
                     LOGGER.debug("Storing new artist: {}", artist.getId());
                     session.save(artist);
                     allArtists.put(artist.getId(), artist);
@@ -588,15 +646,44 @@ public class TidalMusicCache implements MusicCache {
      */
     private Map<String, TidalAlbum> storeAlbums(List<TidalAlbum> albums, Map<String, TidalArtist> artistMap) {
         var allAlbums = new HashMap<String, TidalAlbum>();
+
+        if (albums.isEmpty()) {
+            return allAlbums;
+        }
+
         try (var entityTransaction = EntityTransaction.beginTransaction()) {
             var session = entityTransaction.getSession();
 
+            // Extract all unique album IDs
+            var albumIds = albums.stream()
+                    .map(TidalAlbum::getId)
+                    .distinct()
+                    .toList();
+
+            // Bulk query to find existing albums using JPA Criteria API with OR predicates
+            var builder = session.getCriteriaBuilder();
+            var criteria = builder.createQuery(TidalAlbum.class);
+            var root = criteria.from(TidalAlbum.class);
+
+            var predicates = albumIds.stream()
+                    .map(id -> builder.equal(root.get("id"), id))
+                    .toArray(javax.persistence.criteria.Predicate[]::new);
+
+            criteria.where(builder.or(predicates));
+
+            var existingAlbums = session.createQuery(criteria).getResultList();
+
+            // Add existing albums to map
+            for (var existing : existingAlbums) {
+                allAlbums.put(existing.getId(), existing);
+            }
+
+            LOGGER.debug("Found {} albums in DB, storing {} new albums",
+                    existingAlbums.size(), albums.size() - existingAlbums.size());
+
+            // Save only albums not found in DB
             for (var album : albums) {
-                var found = session.find(TidalAlbum.class, album.getId());
-                if (found != null) {
-                    LOGGER.debug("Album already in DB: {}", found.getId());
-                    allAlbums.put(found.getId(), found);
-                } else {
+                if (!allAlbums.containsKey(album.getId())) {
                     // Ensure album uses artists from artistMap (from DB)
                     var newAlbum = new TidalAlbum(
                             album.getId(),
@@ -789,3 +876,4 @@ public class TidalMusicCache implements MusicCache {
         throw new InvalidURLOrIDException(String.format("Invalid URL or ID: \"%s\"", idOrUrl));
     }
 }
+

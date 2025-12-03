@@ -15,6 +15,8 @@ module qilletni.lib.tidal.main {
     requires kotlinx.coroutines.core;
     requires java.naming;
     requires java.sql;
+    requires org.slf4j;
+    requires org.apache.commons.text;
 
     provides dev.qilletni.api.auth.ServiceProvider
             with TidalServiceProvider;

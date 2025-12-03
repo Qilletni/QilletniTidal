@@ -5,3 +5,5 @@ description: A service provider and library for Tidal
 provider: dev.qilletni.lib.tidal.music.provider.TidalServiceProvider
 native_classes:
   - dev.qilletni.lib.tidal.PlaylistToolsFunctions
+dependencies:
+  qilletni/postgres: ^1.0.0
