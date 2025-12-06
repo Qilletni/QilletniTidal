@@ -98,7 +98,7 @@ public class TidalMusicFetcher implements MusicFetcher {
             var searchResolveResult = currentSearchResolveStrategy.resolveTrack(response.body(), name, artist);
             return searchResolveResult.processToTrack(resourceIdentifier -> fetchTrackById(resourceIdentifier.getId()))
                     .map(track -> {
-                        if (track instanceof TidalTrack tidalTrack) {
+                        if (track instanceof TidalTrack tidalTrack && shouldCacheAliases()) {
                             if (!track.getName().equals(name) || !track.getArtist().getName().equals(artist)) {
                                 // This associates the fetch params with the actual track, so it may be looked up directly
                                 // and bypass the expensive search resolve strategy
@@ -533,6 +533,10 @@ public class TidalMusicFetcher implements MusicFetcher {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    public boolean shouldCacheAliases() {
+        return musicStrategies.getSearchResolveStrategyProvider().orElseThrow().getCurrentSearchResolveStrategy().isCacheable();
     }
 
     public static <T> List<List<T>> partitionList(List<T> list, int pageSize) {

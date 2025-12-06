@@ -38,11 +38,9 @@ public class TidalMusicCache implements MusicCache {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(TidalMusicCache.class);
 
-    private final TidalMusicStrategies musicStrategies;
     private final TidalMusicFetcher tidalMusicFetcher;
 
-    public TidalMusicCache(TidalMusicStrategies musicStrategies, TidalMusicFetcher tidalMusicFetcher) {
-        this.musicStrategies = musicStrategies;
+    public TidalMusicCache(TidalMusicFetcher tidalMusicFetcher) {
         this.tidalMusicFetcher = tidalMusicFetcher;
     }
 
@@ -55,7 +53,7 @@ public class TidalMusicCache implements MusicCache {
             var criteria = builder.createQuery(TidalTrack.class);
             var root = criteria.from(TidalTrack.class);
 
-            if (musicStrategies.getSearchResolveStrategyProvider().orElseThrow().getCurrentSearchResolveStrategy().isCacheable()) {
+            if (tidalMusicFetcher.shouldCacheAliases()) {
                 Join<TidalTrack, TidalArtist> artistsJoin = root.join("artists", JoinType.LEFT);
                 Join<TidalTrack, TrackAlias> aliasesJoin = root.join("searchAliases", JoinType.LEFT);
 
