@@ -65,17 +65,15 @@ public class TidalOAuthAuthorizer implements TidalAuthorizer {
     private static final String PERSIST_ACCESS_TOKEN = "accessToken";
     private static final String PERSIST_REFRESH_TOKEN = "refreshToken";
     private static final String PERSIST_EXPIRES = "tokenExpiresAt";
-    private static final int CALLBACK_PORT = 8888;
-    private static final String CALLBACK_PATH = "/callback";
     private static final int TOKEN_REFRESH_BUFFER_MINUTES = 5;
     private static final int CALLBACK_TIMEOUT_SECONDS = 300; // 5 minutes
 
     private final PackageConfig packageConfig;
-    private final OAuth2Config oAuth2Config;
     private final OAuth2TokenManager tokenManager;
     private final AuthorizationCodeFlow authFlow;
     private final ExecutorService executorService;
     private final ScheduledExecutorService refreshScheduler;
+    private final URI redirectUri;
 
     private TidalApiClient tidalApiClient;
     private UsersResourceObject currentUser;
@@ -89,42 +87,19 @@ public class TidalOAuthAuthorizer implements TidalAuthorizer {
      * @param clientId The Tidal API client ID
      * @param clientSecret The Tidal API client secret
      */
-    public TidalOAuthAuthorizer(PackageConfig packageConfig, String clientId, String clientSecret) {
+    public TidalOAuthAuthorizer(PackageConfig packageConfig, String clientId, String clientSecret, String redirectUri) {
         this.packageConfig = packageConfig;
         this.executorService = Executors.newCachedThreadPool();
         this.refreshScheduler = Executors.newSingleThreadScheduledExecutor();
+        this.redirectUri = URI.create(redirectUri);
 
-        this.oAuth2Config = new OAuth2Config.Builder()
+        var oAuth2Config = new OAuth2Config.Builder()
                 .clientId(clientId)
                 .clientSecret(clientSecret)
                 .build();
 
         this.tokenManager = new OAuth2TokenManager(oAuth2Config);
         this.authFlow = new AuthorizationCodeFlow(oAuth2Config, tokenManager);
-    }
-
-    /**
-     * Creates a {@link TidalOAuthAuthorizer} using environment variables for credentials.
-     *
-     * <p>Required environment variables:
-     * <ul>
-     *   <li>{@code TIDAL_CLIENT_ID} - The Tidal API client ID</li>
-     *   <li>{@code TIDAL_CLIENT_SECRET} - The Tidal API client secret</li>
-     * </ul>
-     *
-     * @param packageConfig The package configuration for persistent storage
-     * @return The created authorizer
-     * @throws IllegalStateException if the required environment variables are not set
-     */
-    public static TidalOAuthAuthorizer createFromEnvironment(PackageConfig packageConfig) {
-        String clientId = System.getenv("TIDAL_CLIENT_ID");
-        String clientSecret = System.getenv("TIDAL_CLIENT_SECRET");
-
-        if (clientId == null || clientSecret == null) {
-            throw new IllegalStateException("TIDAL_CLIENT_ID and TIDAL_CLIENT_SECRET environment variables must be set");
-        }
-
-        return new TidalOAuthAuthorizer(packageConfig, clientId, clientSecret);
     }
 
     /**
@@ -287,7 +262,6 @@ public class TidalOAuthAuthorizer implements TidalAuthorizer {
      * @throws IOException if the callback server cannot be started
      */
     private CompletableFuture<AuthCodeResult> getCodeFromUser() throws IOException {
-        String redirectUri = getRedirectUri();
         String scopes = String.join(" ",
             "user.read",
             "collection.read",
@@ -309,7 +283,7 @@ public class TidalOAuthAuthorizer implements TidalAuthorizer {
         // Initialize login and get authorization URL
         CompletableFuture.runAsync(() -> {
             try {
-                String loginUrl = authFlow.initializeLogin(redirectUri, scopes);
+                String loginUrl = authFlow.initializeLogin(redirectUri.toString(), scopes);
                 LOGGER.info("Authorization URL: {}", loginUrl);
                 LOGGER.info("Please visit this URL to authorize the application");
 
@@ -340,11 +314,14 @@ public class TidalOAuthAuthorizer implements TidalAuthorizer {
      * Starts the HTTP server to handle OAuth callback.
      */
     private void startCallbackServer(CompletableFuture<AuthCodeResult> codeFuture) throws IOException {
-        callbackServer = HttpServer.create(new InetSocketAddress(CALLBACK_PORT), 0);
-        callbackServer.createContext(CALLBACK_PATH, new OAuthCallbackHandler(codeFuture));
+        var callbackPort = redirectUri.getPort();
+        var contextPath = redirectUri.getPath();
+
+        callbackServer = HttpServer.create(new InetSocketAddress(callbackPort), 0);
+        callbackServer.createContext(contextPath, new OAuthCallbackHandler(codeFuture));
         callbackServer.setExecutor(executorService);
         callbackServer.start();
-        LOGGER.debug("Callback server started on port {}", CALLBACK_PORT);
+        LOGGER.debug("Callback server started on port {}", callbackPort);
     }
 
     /**
@@ -375,8 +352,7 @@ public class TidalOAuthAuthorizer implements TidalAuthorizer {
     private CompletableFuture<Void> finalizeAuthentication(AuthCodeResult authCodeResult) {
         return CompletableFuture.runAsync(() -> {
             try {
-                String redirectUri = getRedirectUri();
-                authFlow.finalizeLogin(authCodeResult.code, authCodeResult.state, redirectUri);
+                authFlow.finalizeLogin(authCodeResult.code, authCodeResult.state, redirectUri.toString());
                 saveTokenToCache();
                 LOGGER.debug("Authentication finalized successfully");
             } catch (Exception e) {
@@ -507,13 +483,6 @@ public class TidalOAuthAuthorizer implements TidalAuthorizer {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-    }
-
-    /**
-     * Gets the redirect URI for OAuth callback.
-     */
-    private String getRedirectUri() {
-        return String.format("http://localhost:%d%s", CALLBACK_PORT, CALLBACK_PATH);
     }
 
     /**

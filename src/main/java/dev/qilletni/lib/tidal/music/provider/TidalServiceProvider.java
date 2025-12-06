@@ -53,7 +53,7 @@ public class TidalServiceProvider implements ServiceProvider {
         initConfig();
 
         // Or with explicit credentials
-        authorizer = new TidalOAuthAuthorizer(packageConfig, packageConfig.getOrThrow("clientId"), packageConfig.getOrThrow("redirectUri"));
+        authorizer = new TidalOAuthAuthorizer(packageConfig, packageConfig.getOrThrow("clientId"), packageConfig.getOrThrow("clientSecret"), packageConfig.getOrThrow("redirectUri"));
 
         // Authorize (async)
         return authorizer.authorizeTidal().thenAccept(tidalApi -> {
@@ -61,7 +61,7 @@ public class TidalServiceProvider implements ServiceProvider {
 
             musicStrategies = new TidalMusicStrategies();
             musicFetcher = new TidalMusicFetcher(musicStrategies, "US", tidalApi, authorizer.getCurrentUser().orElseThrow());
-            musicCache = new TidalMusicCache(musicFetcher);
+            musicCache = new TidalMusicCache(musicStrategies, musicFetcher);
             playActor = new DefaultRoutablePlayActor(new ConsolePlayActor());
             trackOrchestrator = defaultTrackOrchestratorFunction.apply(playActor, musicCache);
             musicTypeConverter = new TidalMusicTypeConverter(musicCache);
@@ -144,7 +144,7 @@ public class TidalServiceProvider implements ServiceProvider {
     private void initConfig() {
         packageConfig.loadConfig();
 
-        var requiredOptions = List.of("clientId", "redirectUri", "dbUrl", "dbUsername", "dbPassword");
+        var requiredOptions = List.of("clientId", "clientSecret", "redirectUri", "dbUrl", "dbUsername", "dbPassword");
         var allFound = true;
 
         for (var option : requiredOptions) {
@@ -156,6 +156,16 @@ public class TidalServiceProvider implements ServiceProvider {
 
         if (!allFound) {
             throw new ConfigInitializeException("Tidal config is missing required options, aborting");
+        }
+
+        if (!"true".equals(packageConfig.get("databaseCreated").orElse("false"))) {
+            if (!HibernateUtil.createDatabaseIfNotExists(packageConfig.getOrThrow("dbUrl"), packageConfig.getOrThrow("dbUsername"), packageConfig.getOrThrow("dbPassword"))) {
+                LOGGER.warn("Exiting due to failed database creation, check your database");
+                System.exit(1);
+            }
+
+            packageConfig.set("databaseCreated", "true");
+            packageConfig.saveConfig();
         }
 
         HibernateUtil.initializeSessionFactory(packageConfig.getOrThrow("dbUrl"), packageConfig.getOrThrow("dbUsername"), packageConfig.getOrThrow("dbPassword"));

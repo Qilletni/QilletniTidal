@@ -1,48 +1,16 @@
 package dev.qilletni.lib.tidal.music;
 
 import com.tidal.sdk.tidalapi.generated.TidalApiClient;
-import com.tidal.sdk.tidalapi.generated.models.AlbumsItemsMultiRelationshipDataDocument;
-import com.tidal.sdk.tidalapi.generated.models.AlbumsMultiResourceDataDocument;
-import com.tidal.sdk.tidalapi.generated.models.AlbumsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.AlbumsSingleResourceDataDocument;
-import com.tidal.sdk.tidalapi.generated.models.ArtistsMultiResourceDataDocument;
-import com.tidal.sdk.tidalapi.generated.models.ArtistsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.ArtistsSingleResourceDataDocument;
-import com.tidal.sdk.tidalapi.generated.models.IncludedInner;
-import com.tidal.sdk.tidalapi.generated.models.PlaylistsItemsMultiRelationshipDataDocument;
-import com.tidal.sdk.tidalapi.generated.models.PlaylistsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.PlaylistsSingleResourceDataDocument;
-import com.tidal.sdk.tidalapi.generated.models.ResourceIdentifier;
-import com.tidal.sdk.tidalapi.generated.models.SearchResultsSingleResourceDataDocument;
-import com.tidal.sdk.tidalapi.generated.models.TracksMultiResourceDataDocument;
-import com.tidal.sdk.tidalapi.generated.models.TracksResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.TracksSingleResourceDataDocument;
-import com.tidal.sdk.tidalapi.generated.models.UserCollectionsPlaylistsMultiRelationshipDataDocument;
-import com.tidal.sdk.tidalapi.generated.models.UserCollectionsPlaylistsResourceIdentifier;
-import com.tidal.sdk.tidalapi.generated.models.UserCollectionsSingleResourceDataDocument;
-import com.tidal.sdk.tidalapi.generated.models.UsersAttributes;
-import com.tidal.sdk.tidalapi.generated.models.UsersResourceObject;
-import dev.qilletni.api.music.Album;
-import dev.qilletni.api.music.Artist;
-import dev.qilletni.api.music.MusicFetcher;
-import dev.qilletni.api.music.Playlist;
-import dev.qilletni.api.music.Track;
-import dev.qilletni.api.music.User;
-import dev.qilletni.api.music.strategies.search.SearchResolveStrategy;
+import com.tidal.sdk.tidalapi.generated.models.*;
+import dev.qilletni.api.music.*;
 import dev.qilletni.lib.tidal.CoroutineHelper;
 import dev.qilletni.lib.tidal.api.helper.IncludedInnerWrapper;
 import dev.qilletni.lib.tidal.api.helper.ModelHelper;
-import dev.qilletni.lib.tidal.music.entities.TidalAlbum;
-import dev.qilletni.lib.tidal.music.entities.TidalArtist;
-import dev.qilletni.lib.tidal.music.entities.TidalPlaylist;
-import dev.qilletni.lib.tidal.music.entities.TidalTrack;
-import dev.qilletni.lib.tidal.music.entities.TidalUser;
+import dev.qilletni.lib.tidal.music.entities.*;
 import dev.qilletni.lib.tidal.music.entities.stubs.TidalAlbumStub;
 import dev.qilletni.lib.tidal.music.entities.stubs.TidalArtistStub;
 import dev.qilletni.lib.tidal.music.entities.stubs.TidalTrackStub;
-import dev.qilletni.lib.tidal.music.entities.stubs.TidalUserStub;
 import dev.qilletni.lib.tidal.music.strategies.TidalMusicStrategies;
-import dev.qilletni.lib.tidal.music.strategies.search.TidalSearchResolveStrategyFactory;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +21,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 public class TidalMusicFetcher implements MusicFetcher {
 
@@ -124,26 +93,22 @@ public class TidalMusicFetcher implements MusicFetcher {
                 return Optional.empty();
             }
 
-//            var data = response.body().getData().getRelationships().getTracks().getData();
-
-//            var ids = data.stream().map(ResourceIdentifier::getId).toList();
-
             var currentSearchResolveStrategy = musicStrategies.getSearchResolveStrategyProvider().orElseThrow().getCurrentSearchResolveStrategy();
 
             var searchResolveResult = currentSearchResolveStrategy.resolveTrack(response.body(), name, artist);
-            return searchResolveResult.processToTrack(resourceIdentifier -> fetchTrackById(resourceIdentifier.getId()));
+            return searchResolveResult.processToTrack(resourceIdentifier -> fetchTrackById(resourceIdentifier.getId()))
+                    .map(track -> {
+                        if (track instanceof TidalTrack tidalTrack) {
+                            if (!track.getName().equals(name) || !track.getArtist().getName().equals(artist)) {
+                                // This associates the fetch params with the actual track, so it may be looked up directly
+                                // and bypass the expensive search resolve strategy
+                                LOGGER.info("Adding search alias to track {}: ({}, {})", track, name, artist);
+                                tidalTrack.addSearchAlias(new TrackAlias(name, artist));
+                            }
+                        }
 
-//            System.out.println("Fetching track: " + name);
-//            for (var datum : data) {
-//                var track = fetchTrackById(datum.getId());
-//                if (track.isPresent()) {
-//                    System.out.println(track.get().getName() + " - " + track.get().getId());
-//                } else {
-//                    System.out.println("Track empty");
-//                }
-//            }
-
-//            return fetchTrackById(data.getFirst().getId());
+                        return track;
+                    });
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
@@ -168,8 +133,6 @@ public class TidalMusicFetcher implements MusicFetcher {
                 return Optional.empty();
             }
 
-            var body = singleTrackResponse.body();
-
             return createTrackEntity(singleTrackResponse.body());
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
@@ -181,8 +144,14 @@ public class TidalMusicFetcher implements MusicFetcher {
         throw new RuntimeException("fetchTracks(List<TrackNameArtist>) not supported!");
     }
 
-    @Override
-    public List<Track> fetchTracksById(List<String> list) {
+    public List<Track> fetchTracksById(List<String> ids) {
+        return partitionList(ids, 20)
+                .stream()
+                .flatMap(partition -> fetchLimitedTracksById(partition).stream())
+                .toList();
+    }
+
+    public List<Track> fetchLimitedTracksById(List<String> list) {
         LOGGER.debug("fetchTracksById({})", String.join(", ", list));
 
         try {
@@ -367,6 +336,13 @@ public class TidalMusicFetcher implements MusicFetcher {
     }
 
     public List<Album> fetchAlbumsByIds(List<String> ids) {
+        return partitionList(ids, 20)
+                .stream()
+                .flatMap(partition -> fetchLimitedAlbumsByIds(partition).stream())
+                .toList();
+    }
+
+    public List<Album> fetchLimitedAlbumsByIds(List<String> ids) {
         LOGGER.debug("fetchAlbumsByIds({})", String.join(", ", ids));
 
         if (ids.isEmpty()) {
@@ -381,8 +357,8 @@ public class TidalMusicFetcher implements MusicFetcher {
                                     null,
                                     List.of("artists"),
                                     null,
-                                    null,
                                     ids,
+                                    null,
                                     cont
                             ));
 
@@ -523,6 +499,13 @@ public class TidalMusicFetcher implements MusicFetcher {
     }
 
     public List<Artist> fetchArtistsByIds(List<String> ids) {
+        return partitionList(ids, 20)
+                .stream()
+                .flatMap(partition -> fetchLimitedArtistsByIds(partition).stream())
+                .toList();
+    }
+
+    public List<Artist> fetchLimitedArtistsByIds(List<String> ids) {
         LOGGER.debug("fetchArtistsByIds({})", String.join(", ", ids));
 
         if (ids.isEmpty()) {
@@ -550,6 +533,12 @@ public class TidalMusicFetcher implements MusicFetcher {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    public static <T> List<List<T>> partitionList(List<T> list, int pageSize) {
+        return IntStream.range(0, (list.size() + pageSize - 1) / pageSize)
+                .mapToObj(i -> list.subList(i * pageSize, Math.min((i + 1) * pageSize, list.size())))
+                .collect(Collectors.toList());
     }
 
     private Optional<Track> createTrackEntity(@Nullable TracksSingleResourceDataDocument track) {
@@ -639,9 +628,7 @@ public class TidalMusicFetcher implements MusicFetcher {
                 .map(item -> includedInnerWrapper.getInner(item.getId(), TracksResourceObject.class))
                 .filter(Optional::isPresent)
                 .map(Optional::get)
-                .map(item -> {
-                    return (Track) new TidalTrackStub(item.getId());
-                }).toList();
+                .map(item -> (Track) new TidalTrackStub(item.getId())).toList();
     }
 
     private List<Track> createTrackList(List<TracksResourceObject> tracks, List<IncludedInner> included) {

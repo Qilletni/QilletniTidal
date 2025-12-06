@@ -18,6 +18,11 @@ public class TidalDefaultSearchResolveStrategy implements SearchResolveStrategy<
     }
 
     @Override
+    public boolean isCacheable() {
+        return false;
+    }
+
+    @Override
     public Class<SearchResultsSingleResourceDataDocument> getTrackType() {
         return SearchResultsSingleResourceDataDocument.class;
     }

@@ -6,15 +6,8 @@ import dev.qilletni.api.music.Artist;
 import dev.qilletni.api.music.Track;
 import dev.qilletni.lib.tidal.music.provider.TidalServiceProvider;
 
-import javax.persistence.Entity;
-import javax.persistence.FetchType;
-import javax.persistence.Id;
-import javax.persistence.ManyToMany;
-import javax.persistence.ManyToOne;
-import javax.persistence.OrderColumn;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
+import javax.persistence.*;
+import java.util.*;
 
 @Entity
 public class TidalTrack implements Track {
@@ -32,14 +25,27 @@ public class TidalTrack implements Track {
 
     private int duration;
 
+    /**
+     * This is a list of full track `<name> <artist>` combinations that may be searched for that the track resolves to,
+     * when gotten from a search strategy.
+     * TODO: Make these aliases expirable?
+     */
+    @ElementCollection(fetch = FetchType.LAZY)
+    private List<TrackAlias> searchAliases;
+
     public TidalTrack() {}
 
     public TidalTrack(String id, String name, List<TidalArtist> artists, TidalAlbum album, int duration) {
+        this(id, name, artists, album, duration, new ArrayList<>());
+    }
+
+    public TidalTrack(String id, String name, List<TidalArtist> artists, TidalAlbum album, int duration, List<TrackAlias> searchAliases) {
         this.id = id;
         this.name = name;
         this.artists = artists;
         this.album = album;
         this.duration = duration;
+        this.searchAliases = searchAliases;
     }
 
     @Override
@@ -70,6 +76,19 @@ public class TidalTrack implements Track {
     @Override
     public int getDuration() {
         return duration;
+    }
+
+    public List<TrackAlias> getSearchAliases() {
+        return Objects.requireNonNullElse(searchAliases, Collections.emptyList());
+    }
+
+    public void setSearchAliases(List<TrackAlias> searchAliases) {
+        this.searchAliases = searchAliases;
+    }
+
+    public void addSearchAlias(TrackAlias alias) {
+        if (searchAliases == null) searchAliases = new ArrayList<>();
+        searchAliases.add(alias);
     }
 
     @Override

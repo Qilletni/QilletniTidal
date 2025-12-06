@@ -8,17 +8,17 @@ import dev.qilletni.api.music.MusicFetcher;
 import dev.qilletni.api.music.Playlist;
 import dev.qilletni.api.music.Track;
 import dev.qilletni.lib.tidal.database.EntityTransaction;
-import dev.qilletni.lib.tidal.music.entities.TidalAlbum;
-import dev.qilletni.lib.tidal.music.entities.TidalArtist;
-import dev.qilletni.lib.tidal.music.entities.TidalTrack;
-import dev.qilletni.lib.tidal.music.entities.TidalPlaylist;
-import dev.qilletni.lib.tidal.music.entities.TidalPlaylistIndex;
-import dev.qilletni.lib.tidal.music.entities.TidalUser;
+import dev.qilletni.lib.tidal.music.entities.*;
 import dev.qilletni.lib.tidal.music.entities.stubs.TidalTrackStub;
+import dev.qilletni.lib.tidal.music.strategies.TidalMusicStrategies;
+import org.hibernate.Session;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.persistence.criteria.CriteriaQuery;
 import javax.persistence.criteria.Join;
+import javax.persistence.criteria.JoinType;
+import javax.persistence.criteria.Predicate;
 import java.sql.Date;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -31,15 +31,18 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class TidalMusicCache implements MusicCache {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(TidalMusicCache.class);
 
+    private final TidalMusicStrategies musicStrategies;
     private final TidalMusicFetcher tidalMusicFetcher;
 
-    public TidalMusicCache(TidalMusicFetcher tidalMusicFetcher) {
+    public TidalMusicCache(TidalMusicStrategies musicStrategies, TidalMusicFetcher tidalMusicFetcher) {
+        this.musicStrategies = musicStrategies;
         this.tidalMusicFetcher = tidalMusicFetcher;
     }
 
@@ -52,12 +55,32 @@ public class TidalMusicCache implements MusicCache {
             var criteria = builder.createQuery(TidalTrack.class);
             var root = criteria.from(TidalTrack.class);
 
-            Join<TidalTrack, TidalArtist> artistsJoin = root.join("artists");
+            if (musicStrategies.getSearchResolveStrategyProvider().orElseThrow().getCurrentSearchResolveStrategy().isCacheable()) {
+                Join<TidalTrack, TidalArtist> artistsJoin = root.join("artists", JoinType.LEFT);
+                Join<TidalTrack, TrackAlias> aliasesJoin = root.join("searchAliases", JoinType.LEFT);
 
-            var trackNamePredicate = builder.equal(root.get("name"), name);
-            var artistPredicate = builder.equal(artistsJoin.get("name"), artist);
+                var mainPredicate = builder.and(
+                        builder.equal(root.get("name"), name),
+                        builder.equal(artistsJoin.get("name"), artist)
+                );
 
-            criteria.where(trackNamePredicate, artistPredicate);
+                var aliasPredicate = builder.and(
+                        builder.equal(aliasesJoin.get("title"), name),
+                        builder.equal(aliasesJoin.get("artist"), artist)
+                );
+
+                criteria.where(builder.or(mainPredicate, aliasPredicate));
+                criteria.distinct(true);
+            } else {
+                // Use exact lookup if the strategy is NOT cachable
+                // TODO: Should there be a setting to use aliases if the strategy is NOT cachable?
+                Join<TidalTrack, TidalArtist> artistsJoin = root.join("artists");
+
+                var trackNamePredicate = builder.equal(root.get("name"), name);
+                var artistPredicate = builder.equal(artistsJoin.get("name"), artist);
+
+                criteria.where(trackNamePredicate, artistPredicate);
+            }
 
             var tracks = session.createQuery(criteria).getResultList();
 
@@ -349,11 +372,34 @@ public class TidalMusicCache implements MusicCache {
                 .map(this::storeArtist);
     }
 
+
+    /**
+     * Creates a {@link CriteriaQuery} with a given type that has an {@code id} property, that fetches all entities
+     * with an ID in the given list.
+     *
+     * @return The criteria, which searches all IDs in the list
+     * @param <T> The type of entity to search for
+     */
+    private <T> CriteriaQuery<T> createBulkIdCriteria(Session session, Class<T> type, List<String> ids) {
+        var builder = session.getCriteriaBuilder();
+        var criteria = builder.createQuery(type);
+        var root = criteria.from(type);
+
+        var predicates = ids.stream()
+                .map(id -> builder.equal(root.get("id"), id))
+                .toArray(Predicate[]::new);
+
+        criteria.where(builder.or(predicates));
+
+        return criteria;
+    }
+
     /**
      * Resolve track stubs by fetching them from the API.
      * Returns a list of full TidalTrack objects (though they may still have stub references inside).
      */
     private List<TidalTrack> resolveTrackStubs(List<Track> tracks) {
+        // TODO: Preserve order
         var fullTracks = new ArrayList<TidalTrack>();
         var stubIds = new ArrayList<String>();
 
@@ -394,15 +440,16 @@ public class TidalMusicCache implements MusicCache {
      */
     private List<TidalTrack> resolveNestedStubs(List<TidalTrack> tracks) {
         // Extract artist IDs from tracks only (albums might be stubs)
-        var allArtistIds = new HashSet<String>();
-        for (var track : tracks) {
-            track.getArtists().forEach(a -> allArtistIds.add(a.getId()));
-            // DON'T call getArtists() on album here, it might be a stub
-        }
+        // DON'T call getArtists() on album here, it might be a stub
+        var allArtistIds = tracks.stream()
+                .flatMap(track -> track.getArtists().stream())
+                .map(Artist::getId)
+                .collect(Collectors.toCollection(HashSet::new));
 
         // Extract all album IDs that could be stubs
         var albumIds = tracks.stream()
-                .map(t -> t.getAlbum().getId())
+                .map(TidalTrack::getAlbum)
+                .map(Album::getId)
                 .distinct()
                 .toList();
 
@@ -429,7 +476,8 @@ public class TidalMusicCache implements MusicCache {
                     album.getId(),
                     album.getName(),
                     album.getArtists().stream()
-                            .map(a -> artistMap.get(a.getId()))
+                            .map(Artist::getId)
+                            .map(artistMap::get)
                             .toList()
             );
             resolvedAlbumMap.put(album.getId(), resolvedAlbum);
@@ -441,10 +489,12 @@ public class TidalMusicCache implements MusicCache {
                         track.getId(),
                         track.getName(),
                         track.getArtists().stream()
-                                .map(a -> artistMap.get(a.getId()))
+                                .map(Artist::getId)
+                                .map(artistMap::get)
                                 .toList(),
                         resolvedAlbumMap.get(track.getAlbum().getId()),
-                        track.getDuration()
+                        track.getDuration(),
+                        track.getSearchAliases()
                 ))
                 .toList();
     }
@@ -469,15 +519,7 @@ public class TidalMusicCache implements MusicCache {
         try (var entityTransaction = EntityTransaction.beginTransaction()) {
             var session = entityTransaction.getSession();
 
-            var builder = session.getCriteriaBuilder();
-            var criteria = builder.createQuery(TidalArtist.class);
-            var root = criteria.from(TidalArtist.class);
-
-            var predicates = artistIds.stream()
-                    .map(id -> builder.equal(root.get("id"), id))
-                    .toArray(javax.persistence.criteria.Predicate[]::new);
-
-            criteria.where(builder.or(predicates));
+            var criteria = createBulkIdCriteria(session, TidalArtist.class, artistIds);
 
             var foundArtists = session.createQuery(criteria).getResultList();
             for (var artist : foundArtists) {
@@ -520,15 +562,7 @@ public class TidalMusicCache implements MusicCache {
         try (var entityTransaction = EntityTransaction.beginTransaction()) {
             var session = entityTransaction.getSession();
 
-            var builder = session.getCriteriaBuilder();
-            var criteria = builder.createQuery(TidalAlbum.class);
-            var root = criteria.from(TidalAlbum.class);
-
-            var predicates = albumIds.stream()
-                    .map(id -> builder.equal(root.get("id"), id))
-                    .toArray(javax.persistence.criteria.Predicate[]::new);
-
-            criteria.where(builder.or(predicates));
+            var criteria = createBulkIdCriteria(session, TidalAlbum.class, albumIds);
 
             var foundAlbums = session.createQuery(criteria).getResultList();
             for (var album : foundAlbums) {
@@ -572,7 +606,8 @@ public class TidalMusicCache implements MusicCache {
                     album.getId(),
                     album.getName(),
                     album.getArtists().stream()
-                            .map(a -> artistMap.get(a.getId()))
+                            .map(Artist::getId)
+                            .map(artistMap::get)
                             .toList()
             );
             albumMap.put(album.getId(), resolvedAlbum);
@@ -604,15 +639,7 @@ public class TidalMusicCache implements MusicCache {
                     .toList();
 
             // Bulk query to find existing artists using JPA Criteria API with OR predicates
-            var builder = session.getCriteriaBuilder();
-            var criteria = builder.createQuery(TidalArtist.class);
-            var root = criteria.from(TidalArtist.class);
-
-            var predicates = artistIds.stream()
-                    .map(id -> builder.equal(root.get("id"), id))
-                    .toArray(javax.persistence.criteria.Predicate[]::new);
-
-            criteria.where(builder.or(predicates));
+            var criteria = createBulkIdCriteria(session, TidalArtist.class, artistIds);
 
             var existingArtists = session.createQuery(criteria).getResultList();
 
@@ -661,15 +688,7 @@ public class TidalMusicCache implements MusicCache {
                     .toList();
 
             // Bulk query to find existing albums using JPA Criteria API with OR predicates
-            var builder = session.getCriteriaBuilder();
-            var criteria = builder.createQuery(TidalAlbum.class);
-            var root = criteria.from(TidalAlbum.class);
-
-            var predicates = albumIds.stream()
-                    .map(id -> builder.equal(root.get("id"), id))
-                    .toArray(javax.persistence.criteria.Predicate[]::new);
-
-            criteria.where(builder.or(predicates));
+            var criteria = createBulkIdCriteria(session, TidalAlbum.class, albumIds);
 
             var existingAlbums = session.createQuery(criteria).getResultList();
 
@@ -689,7 +708,8 @@ public class TidalMusicCache implements MusicCache {
                             album.getId(),
                             album.getName(),
                             album.getArtists().stream()
-                                    .map(a -> artistMap.get(a.getId()))
+                                    .map(Artist::getId)
+                                    .map(artistMap::get)
                                     .toList()
                     );
                     LOGGER.debug("Storing new album: {}", newAlbum.getId());
@@ -711,22 +731,56 @@ public class TidalMusicCache implements MusicCache {
     private StoredTracks storeTracks(List<Track> addingTracks) {
         LOGGER.debug("Storing {} tracks", addingTracks.size());
 
-        // First resolve ALL stubs recursively (tracks, then nested artists/albums)
-        var resolvedTracks = resolveNestedStubs(resolveTrackStubs(addingTracks));
-
         try (var entityTransaction = EntityTransaction.beginTransaction()) {
             var session = entityTransaction.getSession();
 
-            // Filter out tracks already in DB
-            var newTracks = resolvedTracks.stream()
-                    .filter(track -> session.find(TidalTrack.class, track.getId()) == null)
+            var trackIds = addingTracks.stream()
+                    .map(Track::getId)
+                    .distinct()
                     .toList();
 
+            var existingTracks = new HashMap<String, TidalTrack>();
+
+            if (!trackIds.isEmpty()) {
+                var criteria = createBulkIdCriteria(session, TidalTrack.class, trackIds);
+
+                var foundTracks = session.createQuery(criteria).getResultList();
+                for (var track : foundTracks) {
+                    existingTracks.put(track.getId(), track);
+                }
+            }
+
+            // Filter out tracks already in DB. If they are already in it, and have any new search aliases, add them to
+            // existing entity.
+            var newTracks = new ArrayList<Track>();
+            for (var addingTrack : addingTracks) {
+                var existingTrack = session.find(TidalTrack.class, addingTrack.getId());
+
+                if (existingTrack == null) {
+                    newTracks.add(addingTrack);
+                    continue;
+                }
+
+                existingTracks.put(existingTrack.getId(), existingTrack);
+
+                if (addingTrack instanceof TidalTrack tidalTrack) {
+                    for (var alias : tidalTrack.getSearchAliases()) {
+                        if (!existingTrack.getSearchAliases().contains(alias)) {
+                            LOGGER.debug("Adding new alias {} to existing track {}", alias, existingTrack.getId());
+                            existingTrack.addSearchAlias(alias);
+                        }
+                    }
+                }
+            }
+
             LOGGER.debug("Found {} tracks already in DB, storing {} new tracks",
-                    resolvedTracks.size() - newTracks.size(), newTracks.size());
+                    addingTracks.size() - newTracks.size(), newTracks.size());
+
+            // First resolve ALL stubs recursively (tracks, then nested artists/albums)
+            var resolvedNewTracks = resolveNestedStubs(resolveTrackStubs(addingTracks));
 
             // Collect all distinct artists (from tracks and albums)
-            var distinctArtists = resolvedTracks.stream()
+            var distinctArtists = resolvedNewTracks.stream()
                     .flatMap(track -> Stream.concat(
                             track.getArtists().stream(),
                             track.getAlbum().getArtists().stream()
@@ -738,7 +792,7 @@ public class TidalMusicCache implements MusicCache {
             var artistMap = storeArtists(distinctArtists);
 
             // Collect all distinct albums
-            var distinctAlbums = resolvedTracks.stream()
+            var distinctAlbums = resolvedNewTracks.stream()
                     .map(TidalTrack::getAlbum)
                     .distinct()
                     .map(TidalAlbum.class::cast)
@@ -748,24 +802,27 @@ public class TidalMusicCache implements MusicCache {
 
             // Store new tracks with DB references
             var fetchedTracks = new ArrayList<Track>();
-            var allTracks = resolvedTracks.stream().map(track -> {
-                if (newTracks.contains(track)) {
-                    var storedTrack = new TidalTrack(
-                            track.getId(),
-                            track.getName(),
-                            track.getArtists().stream()
-                                    .map(a -> artistMap.get(a.getId()))
-                                    .toList(),
-                            albumMap.get(track.getAlbum().getId()),
-                            track.getDuration()
-                    );
-                    LOGGER.debug("Storing new track: {}", storedTrack.getId());
-                    session.save(storedTrack);
-                    fetchedTracks.add(storedTrack);
-                    return storedTrack;
-                } else {
-                    return (Track) session.find(TidalTrack.class, track.getId());
+            var allTracks = resolvedNewTracks.stream().map(track -> {
+                if (existingTracks.containsKey(track.getId())) {
+                    return (Track) existingTracks.get(track.getId());
                 }
+
+                var storedTrack = new TidalTrack(
+                        track.getId(),
+                        track.getName(),
+                        track.getArtists().stream()
+                                .map(Artist::getId)
+                                .map(artistMap::get)
+                                .toList(),
+                        albumMap.get(track.getAlbum().getId()),
+                        track.getDuration(),
+                        track.getSearchAliases()
+                );
+
+                LOGGER.debug("Storing new track: {}", storedTrack.getId());
+                session.save(storedTrack);
+                fetchedTracks.add(storedTrack);
+                return storedTrack;
             }).toList();
 
             return new StoredTracks(fetchedTracks, allTracks);

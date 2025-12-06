@@ -17,6 +17,7 @@ module qilletni.lib.tidal.main {
     requires java.sql;
     requires org.slf4j;
     requires org.apache.commons.text;
+    requires java.transaction;
 
     provides dev.qilletni.api.auth.ServiceProvider
             with TidalServiceProvider;

@@ -2,8 +2,6 @@ package dev.qilletni.lib.tidal.music.strategies.search;
 
 import com.tidal.sdk.tidalapi.generated.models.ResourceIdentifier;
 import com.tidal.sdk.tidalapi.generated.models.SearchResultsSingleResourceDataDocument;
-import com.tidal.sdk.tidalapi.generated.models.TracksResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.TracksSingleResourceDataDocument;
 import dev.qilletni.api.music.MusicCache;
 import dev.qilletni.api.music.Track;
 import dev.qilletni.api.music.strategies.search.SearchResolveStrategy;
@@ -12,7 +10,6 @@ import org.apache.commons.text.similarity.JaroWinklerSimilarity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -56,7 +53,8 @@ public class TidalFuzzySearchResolveStrategy implements SearchResolveStrategy<Se
             double artistScore = calculateArtistScore(artist, track);
             double score = calculateMatchScore(title, artist, track);
 
-            LOGGER.debug("Track: '{}' by '{}' | Title Score: {}, Artist Score: {}, Final Score: {}",
+            LOGGER.debug("Track (#{}): '{}' by '{}' | Title Score: {}, Artist Score: {}, Final Score: {}",
+                    track.getId(),
                     track.getName(),
                     track.getArtists().isEmpty() ? "Unknown" : track.getArtists().get(0).getName(),
                     String.format("%.3f", titleScore),
@@ -79,6 +77,11 @@ public class TidalFuzzySearchResolveStrategy implements SearchResolveStrategy<Se
         }
 
         return bestMatch != null ? new SearchResolveResult(bestMatch) : null;
+    }
+
+    @Override
+    public boolean isCacheable() {
+        return true;
     }
 
     /**
