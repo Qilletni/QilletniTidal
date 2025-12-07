@@ -196,6 +196,7 @@ public class TidalMusicFetcher implements MusicFetcher {
                                             currentUser.getId(),
                                             null,
                                             null,
+                                            null,
                                             List.of("playlists"),
                                             cont
                                     ));

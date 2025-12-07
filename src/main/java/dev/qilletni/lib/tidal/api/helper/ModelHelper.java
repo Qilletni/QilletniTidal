@@ -1,33 +1,6 @@
 package dev.qilletni.lib.tidal.api.helper;
 
-import com.tidal.sdk.tidalapi.generated.models.AlbumsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.AppreciationsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.ArtistBiographiesResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.ArtistClaimsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.ArtistRolesResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.ArtistsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.ArtworksResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.GenresResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.IncludedInner;
-import com.tidal.sdk.tidalapi.generated.models.LyricsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.PlayQueuesResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.PlaylistsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.ProvidersResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.ResourceIdentifier;
-import com.tidal.sdk.tidalapi.generated.models.SearchResultsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.SearchSuggestionsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.SharesResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.TrackFilesResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.TrackManifestsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.TrackSourceFilesResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.TrackStatisticsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.TracksResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.UserCollectionsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.UserEntitlementsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.UserRecommendationsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.UserReportsResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.UsersResourceObject;
-import com.tidal.sdk.tidalapi.generated.models.VideosResourceObject;
+import com.tidal.sdk.tidalapi.generated.models.*;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collections;
@@ -71,6 +44,7 @@ public class ModelHelper {
             case TrackSourceFilesResourceObject obj -> obj.getId();
             case TracksResourceObject obj -> obj.getId();
             case TrackStatisticsResourceObject obj -> obj.getId();
+            case UserCollectionFoldersResourceObject obj -> obj.getId();
             case UserCollectionsResourceObject obj -> obj.getId();
             case UserEntitlementsResourceObject obj -> obj.getId();
             case UserRecommendationsResourceObject obj -> obj.getId();

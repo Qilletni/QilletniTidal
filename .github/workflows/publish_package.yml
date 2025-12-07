@@ -19,6 +19,23 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: Qilletni/tidal-sdk-android-standalone
+          path: tidal-sdk-android-standalone
+
+      # tidal-sdk-android-standalone uses Java 21 because of its kotlin dependency
+      - name: Set up Java 21
+        uses: actions/setup-java@v3
+        with:
+          java-version: '21'
+          distribution: 'adopt'
+          cache: 'gradle'
+
+      # Qilletni packages use Java 22
+      - name: Set up Java 22
+        uses: actions/setup-java@v3
+        with:
+          java-version: '22'
+          distribution: 'adopt'
+          cache: 'gradle'
 
       - uses: gradle/actions/setup-gradle@v5
 
@@ -36,10 +53,10 @@ jobs:
         env:
           QPM_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-#      - name: Repository Dispatch
-#        uses: peter-evans/repository-dispatch@v4
-#        with:
-#          token: ${{ secrets.DISPATCH_PAT }}
-#          repository: Qilletni/qilletni-package-docs
-#          event-type: update-docs
-#          client-payload: '{"package": "spotify"}'
+      - name: Repository Dispatch
+        uses: peter-evans/repository-dispatch@v4
+        with:
+          token: ${{ secrets.DISPATCH_PAT }}
+          repository: Qilletni/qilletni-package-docs
+          event-type: update-docs
+          client-payload: '{"package": "tidal"}'
